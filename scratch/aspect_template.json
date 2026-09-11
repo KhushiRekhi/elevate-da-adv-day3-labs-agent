@@ -1,0 +1,39 @@
+{
+  "name": "table-operational-spec",
+  "type": "record",
+  "recordFields": [
+    {
+      "name": "table_type",
+      "type": "enum",
+      "index": 1,
+      "constraints": {
+        "required": true
+      },
+      "enumValues": [
+        { "name": "STREAMING_TABLE", "index": 1 },
+        { "name": "BATCH_TABLE", "index": 2 }
+      ]
+    },
+    {
+      "name": "pii_included",
+      "type": "bool",
+      "index": 2,
+      "constraints": {
+        "required": true
+      }
+    },
+    {
+      "name": "data_owner_team",
+      "type": "enum",
+      "index": 3,
+      "constraints": {
+        "required": true
+      },
+      "enumValues": [
+        { "name": "store-ops", "index": 1 },
+        { "name": "inventory-mgmt", "index": 2 },
+        { "name": "loss-prevention", "index": 3 }
+      ]
+    }
+  ]
+}

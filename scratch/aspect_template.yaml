@@ -1,0 +1,22 @@
+name: "table-operational-spec"
+type: "record"
+recordFields:
+  - name: "table_type"
+    type: "enum"
+    enumValues:
+      - name: "STREAMING_TABLE"
+      - name: "BATCH_TABLE"
+    constraints:
+      required: true
+  - name: "pii_included"
+    type: "bool"
+    constraints:
+      required: true
+  - name: "data_owner_team"
+    type: "enum"
+    enumValues:
+      - name: "store-ops"
+      - name: "inventory-mgmt"
+      - name: "loss-prevention"
+    constraints:
+      required: true

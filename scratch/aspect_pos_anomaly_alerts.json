@@ -1,0 +1,9 @@
+{
+  "data-adv-sg.us-central1.table-operational-spec": {
+    "data": {
+      "table_type": "STREAMING_TABLE",
+      "pii_included": false,
+      "data_owner_team": "loss-prevention"
+    }
+  }
+}

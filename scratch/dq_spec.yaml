@@ -1,0 +1,14 @@
+samplingPercent: 100.0
+postScanActions:
+  bigqueryExport:
+    resultsTable: "//bigquery.googleapis.com/projects/data-adv-sg/datasets/cymbal_governance/tables/data_quality_results"
+rules:
+  - column: "transaction_id"
+    dimension: "COMPLETENESS"
+    nonNullExpectation: {}
+  - dimension: "INTEGRITY"
+    rowConditionExpectation:
+      sqlExpression: "total = subtotal_amount - discount + tax_amount"
+  - dimension: "INTEGRITY"
+    rowConditionExpectation:
+      sqlExpression: "item_count <= total_quantity"
