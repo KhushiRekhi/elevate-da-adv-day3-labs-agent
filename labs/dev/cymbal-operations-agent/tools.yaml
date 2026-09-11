@@ -1,0 +1,29 @@
+kind: source
+name: bigtable-source
+type: bigtable
+project: data-adv-sg
+instance: operations-db
+---
+kind: tool
+name: list_bigtable_tables
+type: bigtable-list-tables
+source: bigtable-source
+description: "List all Bigtable tables in instance operations-db."
+---
+kind: tool
+name: query_cashier_alerts
+type: bigtable-sql
+source: bigtable-source
+description: "Query real-time cashier anomaly metrics, 1-hour rolling stats, override counts, promo rates, and audit status flags from Bigtable table cashier_realtime_alerts."
+parameters:
+  - name: row_prefix
+    type: string
+    description: "Row key prefix to filter cashier alerts, formatted as STORE_<STORE_ID>#CASH_<CASHIER_ID>, e.g. STORE_048#CASH_1190"
+statement: |
+  SELECT CAST(_key AS STRING) AS row_key, flags, stats FROM cashier_realtime_alerts WHERE CAST(_key AS STRING) LIKE CONCAT(@row_prefix, '%') LIMIT 5
+---
+kind: toolset
+name: bigtable_toolset
+tools:
+  - list_bigtable_tables
+  - query_cashier_alerts
