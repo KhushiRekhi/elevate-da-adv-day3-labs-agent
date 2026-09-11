@@ -1,29 +1,149 @@
 {
   "eval_cases": [
     {
-      "eval_case_id": "greeting",
+      "eval_case_id": "pos_hardware_err_pay_4001",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Hello, what can you help me with?"}]
-      }
-    },
-    {
-      "eval_case_id": "weather_query",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What's the weather like in San Francisco?"}]
-      }
-    },
-    {
-      "eval_case_id": "capital_lookup",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What is the capital of France?"}]
+        "parts": [
+          {
+            "text": "What is the immediate field recovery protocol when a cashier encounters an ERR-PAY-4001 EMV contactless payment freeze, and how do we ensure the customer is not double-charged?"
+          }
+        ]
       },
       "reference": {
         "response": {
           "role": "model",
-          "parts": [{"text": "The capital of France is Paris."}]
+          "parts": [
+            {
+              "text": "For an ERR-PAY-4001 EMV contactless payment freeze on Toshiba TCx 810 hardware: Instruct the customer to hold and remove their payment card/device, cancel tender on the POS terminal display, soft reboot the PIN pad or power-cycle the reader, verify gateway settlement in the electronic journal, confirm that an automatic reversal (0420 reversal message) is generated to prevent double-charging, and print a void or unsettled verification slip if requested by the customer. Refer to the certified Toshiba TCx 810 Hardware, Diagnostics & Service Guide."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "out_of_scope_hardware_fallback",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "How do I replace the engine oil on a Ford F-150 truck?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "WARNING: The query falls below the minimum certified similarity threshold (0.70) and no matching POS runbook documentation was found in certified store manuals. Vehicle maintenance procedures are out of scope for the Cymbal Operations Agent."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "inventory_stockout_risk_under_20h",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "What is the estimated cover hours remaining for store inventory positions experiencing stockout risk of less than 20 hours, and what is their total on-hand inventory?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "From gold_inventory_reconciliation_ledger, inventory positions with Estimated Inventory Cover Hours below 20.0 hours include prod_4691 at Cymbal Dubai Mall Grand Galleria (STORE_015) with approximately 4.5 cover hours remaining and 46 total on-hand inventory units."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "realtime_cashier_metrics_store48",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Read live 1-hour rolling metrics and audit status flags for Cashier CASH_1190 at Store 48."
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Cashier CASH_1190 at Store 048 (row key STORE_048#CASH_1190 in Cloud Bigtable cashier_realtime_alerts) has 32 transactions in the rolling 1-hour window, 17 manual overrides (53.13% manual override rate), 19 promotions applied (59.38% promo rate), and an audit status of 'clear'."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "warranty_transaction_lookup",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Check transaction details for TXN-20260312-0015811 and show the warranty coverage policy for the purchased item."
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Transaction TXN-20260312-0015811 at STORE_005 includes item prod_1954 (Samsung Galaxy Watch4 Classic LTE). The warranty coverage policy from warranty_sections_extracted provides a 24-month limited hardware warranty covering defects in materials and workmanship, with exclusions for accidental water or physical damage."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "dual_cashier_baseline_comparison",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "What is Cashier CASH_1190's live 1-hour override rate right now, compared to their 7-day historical override baseline?"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Cashier CASH_1190's live 1-hour manual override rate is 53.13% (17 overrides across 32 transactions) from Cloud Bigtable, which is significantly lower than their 7-day historical override baseline of 94.59% (35 promo abuse alerts out of 37 total alerts) from pos_anomaly_alerts in BigQuery."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "cross_cloud_offender_audit",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Show cashiers with active cashier promo abuse alerts in the last 7 days and retrieve checkout logs for the top offender."
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Ranking of pos_anomaly_alerts over the last 7 days identifies Cashier CASH_1063 at Store STORE_016 as the top offender with 50 alerts and a 100% promo override rate. Checkout transaction logs from pos_transactions_gold reveal rapid-fire manual overrides on September 10, 2026, including over $1,000 in overrides on consumer electronics."
+            }
+          ]
         }
       }
     }

@@ -29,7 +29,13 @@ class GlobalGemini(Gemini):
 
     @cached_property
     def api_client(self) -> Client:
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "data-adv-sg")
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID")
+        if not project_id:
+            try:
+                import google.auth
+                _, project_id = google.auth.default()
+            except Exception:
+                pass
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         return Client(vertexai=True, project=project_id, location=location)
 

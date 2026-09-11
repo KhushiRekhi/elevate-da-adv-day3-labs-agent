@@ -71,7 +71,12 @@ SCENARIOS = [
     },
 ]
 
-REPORT_PATH = "/usr/local/google/home/khushmeetrekhi/.gemini/jetski/brain/184fb6aa-69f9-492d-b9ad-663082342c44/test_status.md"
+REPORT_PATH = os.getenv(
+    "REPORT_PATH",
+    os.path.expanduser("~/.gemini/jetski/brain/184fb6aa-69f9-492d-b9ad-663082342c44/test_status.md")
+    if os.path.exists(os.path.expanduser("~/.gemini/jetski/brain/184fb6aa-69f9-492d-b9ad-663082342c44"))
+    else os.path.join(os.path.dirname(__file__), "test_status.md")
+)
 
 
 def run_eval():
@@ -152,7 +157,8 @@ def run_eval():
     # Generate Markdown Report
     report = []
     report.append("# Lab 03: Multi-Tool ADK Agent Empirical Verification Report\n")
-    report.append(f"**GCP Project ID:** `data-adv-sg`  ")
+    proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID", "data-adv-sg")
+    report.append(f"**GCP Project ID:** `{proj}`  ")
     report.append(f"**Location:** `us-central1` (Vertex AI `global`)  ")
     report.append(f"**Execution Timestamp:** `{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}`  ")
     report.append(f"**Coordinator Agent:** `cymbal_operations_agent` (`gemini-3.6-flash`)  \n")

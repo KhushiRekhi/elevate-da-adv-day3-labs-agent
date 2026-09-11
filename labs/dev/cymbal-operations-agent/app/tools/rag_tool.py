@@ -5,18 +5,48 @@ certified Cymbal POS hardware manuals and service runbooks in BigQuery.
 Uses fine-grained sliding-window chunk embeddings and adjacent context stitching (N-1 to N+1).
 """
 
+from __future__ import annotations
+
+import logging
 import os
 import re
 import time
-import logging
 from typing import Optional
-from google.cloud import bigquery
+
+import google.auth
 from google.api_core.exceptions import GoogleAPICallError
+from google.cloud import bigquery
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROJECT_ID = "data-adv-sg"
+# Exact String Error and Decline Constants mandated by SDD
+WARNING_BELOW_THRESHOLD = (
+    "WARNING: The query falls below the minimum certified similarity threshold (0.70) "
+    "and no matching POS runbook documentation was found in certified store manuals."
+)
+DECLINE_OUT_OF_SCOPE = (
+    "DECLINE: Query falls outside certified POS hardware troubleshooting runbooks."
+)
+ERROR_DATABASE_UNREACHABLE = (
+    "ERROR: POS runbook database is currently unreachable due to transient connectivity issues. Please retry shortly."
+)
+
 SIMILARITY_THRESHOLD = 0.70
+
+
+def get_current_project_id() -> str:
+    """Dynamically resolves the active Google Cloud project ID."""
+    proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID")
+    if not proj:
+        try:
+            _, proj = google.auth.default()
+        except Exception:
+            pass
+    if not proj:
+        raise ValueError(
+            "Project ID could not be determined. Please set GOOGLE_CLOUD_PROJECT or PROJECT_ID environment variable."
+        )
+    return proj
 
 
 def pos_troubleshooting_rag_tool(query: str) -> str:
@@ -40,7 +70,7 @@ def pos_troubleshooting_rag_tool(query: str) -> str:
         clickable Google Cloud Storage PDF manual links, and stitched procedural steps.
         If out-of-scope or below confidence threshold, returns a certified warning message.
     """
-    project_id = os.getenv("PROJECT_ID") or "data-adv-sg"
+    project_id = get_current_project_id()
     location = os.getenv("LOCATION", "us-central1")
     client = bigquery.Client(project=project_id, location=location)
 
@@ -51,27 +81,20 @@ def pos_troubleshooting_rag_tool(query: str) -> str:
         try:
             return _execute_rag_search(client, project_id, query)
         except GoogleAPICallError as e:
-            logger.warning(
-                "BigQuery API error on attempt %d/%d: %s",
-                attempt + 1,
-                max_retries,
-                str(e),
-            )
+            logger.warning("BigQuery API attempt %d failed: %s", attempt + 1, e)
             if attempt < max_retries - 1:
                 time.sleep(backoff_seconds[attempt])
-            else:
-                return (
-                    f"BigQuery RAG service temporarily unavailable after {max_retries} retries: {str(e)}"
-                )
         except Exception as e:
-            logger.error("Unexpected error in pos_troubleshooting_rag_tool: %s", str(e), exc_info=True)
-            return f"Error executing POS troubleshooting retrieval: {str(e)}"
+            logger.error("Unexpected error in POS RAG tool attempt %d: %s", attempt + 1, e)
+            if attempt < max_retries - 1:
+                time.sleep(backoff_seconds[attempt])
+
+    return ERROR_DATABASE_UNREACHABLE
 
 
 def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) -> str:
-    """Executes vector similarity search with adjacent chunk stitching and SEARCH fallback."""
-
-    # 1. Vector Search with adjacent context stitching (N-1 to N+1)
+    """Performs vector similarity search followed by full-text SEARCH fallback."""
+    # 1. Primary Vector Search with ML.GENERATE_EMBEDDING and adjacent window stitching
     vector_sql = f"""
     WITH matched_chunks AS (
       SELECT
@@ -131,18 +154,17 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
             return _format_runbook_response(top_row, method="Vector Similarity Search")
 
     # 2. Fallback: Full-Text SEARCH() for exact error codes or domain keywords
-    # Extract error codes like ERR-PAY-4001 or model identifiers
-    error_codes = re.findall(r'[A-Z0-9]+-[A-Z0-9-]+', query)
+    error_codes = re.findall(r"[A-Z0-9]+-[A-Z0-9-]+", query)
     search_terms = []
     if error_codes:
         search_terms.extend(error_codes)
-    
-    # Also check for key diagnostic tokens
+
     for kw in ["EMV", "freeze", "cutter", "solenoid", "thermal", "beep", "offline", "reboot"]:
         if kw.lower() in query.lower() and kw not in search_terms:
             search_terms.append(kw)
 
     for term in search_terms:
+        formatted_term = f"`{term}`" if "-" in term else term
         fallback_sql = f"""
         WITH matched_chunks AS (
           SELECT
@@ -176,8 +198,6 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
           m.chunk_index,
           m.similarity_score
         """
-        # Wrap search token in backticks to safely handle hyphens in BigQuery SEARCH()
-        formatted_term = f"`{term}`" if "-" in term else term
         fb_config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("search_term", "STRING", formatted_term)
@@ -188,16 +208,12 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
             return _format_runbook_response(fb_results[0], method=f"Full-Text SEARCH Fallback ('{term}')")
 
     # 3. Certified Safety Fallback Warning when out-of-scope or below threshold
-    return (
-        "WARNING: The query falls below the minimum certified similarity threshold (0.70) "
-        "and no matching POS runbook documentation was found in certified store manuals."
-    )
+    return WARNING_BELOW_THRESHOLD
 
 
 def _format_runbook_response(row: bigquery.Row, method: str) -> str:
     """Formats retrieved runbook chunk into a structured response with clickable HTTPS links."""
     gcs_uri = row["source_pdf_uri"] or ""
-    # Convert gs://... to clickable HTTPS link https://storage.cloud.google.com/...
     https_url = gcs_uri.replace("gs://", "https://storage.cloud.google.com/")
     doc_name = row["document_filename"] or "POS Hardware Service Manual"
     doc_title = row["document_title"] or doc_name

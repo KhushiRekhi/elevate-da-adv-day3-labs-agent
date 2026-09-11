@@ -4,24 +4,51 @@ Connects to the deployed mcp-toolbox-bigtable Cloud Run microservice via Model C
 using Streamable HTTP transport and GCP OIDC bearer token authentication.
 """
 
-import os
+from __future__ import annotations
+
 import logging
+import os
+from typing import Optional
+
 import google.auth
 import google.oauth2.id_token
-from google.auth.transport.requests import Request
 from google.auth import impersonated_credentials
+from google.auth.transport.requests import Request
 from google.adk.tools import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BIGTABLE_MCP_URL = "https://mcp-toolbox-bigtable-1055849777405.us-central1.run.app"
-DEFAULT_TARGET_SA = "cymbal-sa-data@data-adv-sg.iam.gserviceaccount.com"
+
+
+def get_current_project_id() -> str:
+    """Dynamically resolves the active Google Cloud project ID."""
+    proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID")
+    if not proj:
+        try:
+            _, proj = google.auth.default()
+        except Exception:
+            pass
+    if not proj:
+        raise ValueError(
+            "Project ID could not be determined. Please set GOOGLE_CLOUD_PROJECT or PROJECT_ID environment variable."
+        )
+    return proj
+
+
+def get_target_service_account() -> str:
+    """Dynamically resolves the target service account for Cloud Run OIDC invocation."""
+    sa = os.getenv("TARGET_SERVICE_ACCOUNT")
+    if sa:
+        return sa
+    project_id = get_current_project_id()
+    return f"cymbal-sa-data@{project_id}.iam.gserviceaccount.com"
 
 
 def get_oidc_headers(service_url: str) -> dict:
     """Generates an OIDC Authorization header for the target Cloud Run service audience."""
-    target_sa = os.getenv("TARGET_SERVICE_ACCOUNT", DEFAULT_TARGET_SA)
+    target_sa = get_target_service_account()
     try:
         base_creds, _ = google.auth.default()
         target_creds = impersonated_credentials.Credentials(

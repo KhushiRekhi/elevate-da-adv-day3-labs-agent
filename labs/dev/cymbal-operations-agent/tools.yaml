@@ -1,7 +1,7 @@
 kind: source
 name: bigtable-source
 type: bigtable
-project: data-adv-sg
+project: ${PROJECT_ID}
 instance: operations-db
 ---
 kind: tool
