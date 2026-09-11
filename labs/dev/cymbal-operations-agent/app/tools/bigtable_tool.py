@@ -19,7 +19,40 @@ from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnecti
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BIGTABLE_MCP_URL = "https://mcp-toolbox-bigtable-1055849777405.us-central1.run.app"
+
+def get_bigtable_mcp_url() -> str:
+    """Dynamically resolves the Bigtable MCP Cloud Run service URL without hardcoded project numbers."""
+    url = os.getenv("BIGTABLE_MCP_URL")
+    if url:
+        return url
+    project_id = get_current_project_id()
+    region = os.getenv("BIGTABLE_MCP_REGION", os.getenv("LOCATION", "us-central1"))
+    service_name = os.getenv("BIGTABLE_MCP_SERVICE_NAME", "mcp-toolbox-bigtable")
+    try:
+        import subprocess
+
+        res = subprocess.run(
+            [
+                "gcloud",
+                "run",
+                "services",
+                "describe",
+                service_name,
+                f"--region={region}",
+                f"--project={project_id}",
+                "--format=value(status.url)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception as e:
+        logger.warning("Dynamic Cloud Run service URL resolution via gcloud failed: %s", e)
+
+    return f"https://{service_name}-{project_id}.{region}.run.app"
 
 
 def get_current_project_id() -> str:
@@ -70,7 +103,7 @@ def get_oidc_headers(service_url: str) -> dict:
         return {"Authorization": f"Bearer {token}"}
 
 
-service_url = os.getenv("BIGTABLE_MCP_URL", DEFAULT_BIGTABLE_MCP_URL)
+service_url = get_bigtable_mcp_url()
 mcp_endpoint = f"{service_url.rstrip('/')}/mcp"
 
 bigtable_mcp_toolset = McpToolset(

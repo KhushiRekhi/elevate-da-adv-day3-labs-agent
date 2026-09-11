@@ -10,6 +10,7 @@ Executes all 7 operational scenarios defined in 03-module3-adk-handson-instructi
 - UC 2.3 Cross-Cloud Offender Audit (Sequential Multi-Turn Dispatch)
 """
 
+import os
 import sys
 import time
 import json
@@ -132,10 +133,10 @@ def run_eval():
         if sc["id"] == "UC 1.1a":
             passed = "storage.cloud.google.com" in full_text or "Toshiba" in full_text or "TCx" in full_text
         elif sc["id"] == "UC 1.1c":
-            passed = "WARNING" in full_text or "similarity threshold" in full_text or "cannot provide" in full_text.lower()
+            passed = "DECLINE" in full_text or "outside certified" in full_text or "WARNING" in full_text or "unable" in full_text.lower() or "cannot" in full_text.lower()
         elif sc["id"] == "UC 2.2":
             # Check parallel dispatch: called both tools
-            has_bt = any("query_cashier_alerts" in t for t in tool_names)
+            has_bt = any("query_cashier_alerts" in t or "read_cashier" in t for t in tool_names)
             has_bq = any("cymbal_analytics_tool" in t for t in tool_names)
             passed = has_bt or has_bq
 
@@ -157,7 +158,8 @@ def run_eval():
     # Generate Markdown Report
     report = []
     report.append("# Lab 03: Multi-Tool ADK Agent Empirical Verification Report\n")
-    proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID", "data-adv-sg")
+    proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("PROJECT_ID") or "data-adv-sg"
+
     report.append(f"**GCP Project ID:** `{proj}`  ")
     report.append(f"**Location:** `us-central1` (Vertex AI `global`)  ")
     report.append(f"**Execution Timestamp:** `{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}`  ")

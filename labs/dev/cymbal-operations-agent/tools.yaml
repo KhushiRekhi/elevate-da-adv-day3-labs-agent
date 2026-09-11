@@ -5,10 +5,28 @@ project: ${PROJECT_ID}
 instance: operations-db
 ---
 kind: tool
-name: list_bigtable_tables
-type: bigtable-list-tables
+name: read_cashier_realtime_alerts_sql
+type: bigtable-sql
 source: bigtable-source
-description: "List all Bigtable tables in instance operations-db."
+description: "Query real-time cashier anomaly metrics, 1-hour rolling stats, override counts, promo rates, and audit status flags from Bigtable table cashier_realtime_alerts."
+parameters:
+  - name: row_prefix
+    type: string
+    description: "Row key prefix to filter cashier alerts, formatted as STORE_<STORE_ID>#CASH_<CASHIER_ID>, e.g. STORE_048#CASH_1190"
+statement: |
+  SELECT CAST(_key AS STRING) AS row_key, flags, stats FROM cashier_realtime_alerts WHERE CAST(_key AS STRING) LIKE CONCAT(@row_prefix, '%') LIMIT 5
+---
+kind: tool
+name: read_pos_transactions_enriched_sql
+type: bigtable-sql
+source: bigtable-source
+description: "Query real-time enriched POS transactions and checkout audit records from Bigtable table pos_transactions_enriched."
+parameters:
+  - name: row_prefix
+    type: string
+    description: "Row key prefix to filter enriched POS transactions, formatted as STORE_<STORE_ID>#TXN, e.g. STORE_001#TXN"
+statement: |
+  SELECT CAST(_key AS STRING) AS row_key, alerts, tx FROM pos_transactions_enriched WHERE CAST(_key AS STRING) LIKE CONCAT(@row_prefix, '%') LIMIT 5
 ---
 kind: tool
 name: query_cashier_alerts
@@ -22,8 +40,17 @@ parameters:
 statement: |
   SELECT CAST(_key AS STRING) AS row_key, flags, stats FROM cashier_realtime_alerts WHERE CAST(_key AS STRING) LIKE CONCAT(@row_prefix, '%') LIMIT 5
 ---
+kind: tool
+name: list_bigtable_tables
+type: bigtable-list-tables
+source: bigtable-source
+description: "List all Bigtable tables in instance operations-db."
+---
 kind: toolset
 name: bigtable_toolset
 tools:
-  - list_bigtable_tables
+  - read_cashier_realtime_alerts_sql
+  - read_pos_transactions_enriched_sql
   - query_cashier_alerts
+  - list_bigtable_tables
+

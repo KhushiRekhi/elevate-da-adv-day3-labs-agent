@@ -16,7 +16,7 @@ from typing import Any, Optional
 import google.auth
 from google.auth.transport.requests import Request
 from google.adk.tools.data_agent.config import DataAgentToolConfig
-from google.adk.tools.data_agent.data_agent_tool import ask_data_agent
+from google.adk.tools.data_agent.data_agent_tool import ask_data_agent, list_accessible_data_agents
 from google.adk.tools.data_agent.data_agent_toolset import DataAgentToolset
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,42 @@ def get_current_project_id() -> str:
 
 
 def get_data_agent_resource_name() -> str:
-    """Dynamically resolves the published Data Agent resource name."""
+    """Dynamically resolves the published Data Agent resource name without hardcoded IDs."""
     agent_id = os.getenv("DATA_AGENT_ID")
     if agent_id:
         return agent_id
     project_id = get_current_project_id()
-    agent_name = os.getenv("DATA_AGENT_NAME", "agent_a5fd9440-6d65-4bd7-9335-d66b1fb79551")
-    return f"projects/{project_id}/locations/global/dataAgents/{agent_name}"
+    agent_name = os.getenv("DATA_AGENT_NAME")
+    if agent_name:
+        if agent_name.startswith("projects/"):
+            return agent_name
+        return f"projects/{project_id}/locations/global/dataAgents/{agent_name}"
+
+    # Dynamically discover accessible data agents in the project
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        credentials.refresh(Request())
+        res = list_accessible_data_agents(project_id, credentials)
+        if res.get("status") == "SUCCESS":
+            agents = res.get("response", [])
+            # Priority 1: Match agent with 'cymbal' in display name
+            for agent in agents:
+                display_name = agent.get("displayName", "").lower()
+                if "cymbal" in display_name:
+                    return agent["name"]
+            # Priority 2: Return first agent if available
+            if agents:
+                return agents[0]["name"]
+    except Exception as e:
+        logger.warning("Dynamic discovery of Data Agent failed: %s", e)
+
+    raise ValueError(
+        f"Could not dynamically discover published Data Agent for project {project_id}. "
+        "Please set DATA_AGENT_ID or DATA_AGENT_NAME environment variable."
+    )
+
 
 
 def cymbal_analytics_tool(query: str) -> str:

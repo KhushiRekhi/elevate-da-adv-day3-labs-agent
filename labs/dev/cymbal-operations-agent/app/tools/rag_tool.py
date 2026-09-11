@@ -20,13 +20,11 @@ from google.cloud import bigquery
 logger = logging.getLogger(__name__)
 
 # Exact String Error and Decline Constants mandated by SDD
-WARNING_BELOW_THRESHOLD = (
-    "WARNING: The query falls below the minimum certified similarity threshold (0.70) "
-    "and no matching POS runbook documentation was found in certified store manuals."
-)
 DECLINE_OUT_OF_SCOPE = (
     "DECLINE: Query falls outside certified POS hardware troubleshooting runbooks."
 )
+MANDATORY_DECLINE_STRING = DECLINE_OUT_OF_SCOPE
+WARNING_BELOW_THRESHOLD = DECLINE_OUT_OF_SCOPE
 ERROR_DATABASE_UNREACHABLE = (
     "ERROR: POS runbook database is currently unreachable due to transient connectivity issues. Please retry shortly."
 )
@@ -93,17 +91,19 @@ def pos_troubleshooting_rag_tool(query: str) -> str:
 
 
 def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) -> str:
-    """Performs vector similarity search followed by full-text SEARCH fallback."""
-    # 1. Primary Vector Search with ML.GENERATE_EMBEDDING and adjacent window stitching
-    vector_sql = f"""
-    WITH matched_chunks AS (
+    """Performs unified vector similarity search with in-SQL error-boosting regex check
+    and adjacent context window stitching in a single GoogleSQL statement.
+    """
+    unified_sql = f"""
+    WITH vector_candidates AS (
       SELECT
         base.document_filename,
         base.document_title,
         base.equipment_covered,
         base.source_pdf_uri,
         base.chunk_index,
-        ROUND(1 - distance, 4) AS similarity_score
+        base.chunk_content,
+        ROUND(1 - distance, 4) AS cosine_similarity
       FROM VECTOR_SEARCH(
         TABLE `{project_id}.cymbal_gold.pos_manual_chunk_embeddings`,
         'embedding',
@@ -115,9 +115,29 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
             STRUCT('RETRIEVAL_QUERY' AS task_type)
           )
         ),
-        top_k => 3,
+        top_k => 15,
         distance_type => 'COSINE'
       )
+    ),
+    scored_candidates AS (
+      SELECT
+        v.*,
+        CASE
+          -- Error-boosting regex check: boost score when query contains a specific error code matching chunk_content
+          WHEN REGEXP_CONTAINS(@query, r'(?i)\\bERR-[A-Z0-9-]+\\b')
+               AND REGEXP_CONTAINS(v.chunk_content, REGEXP_EXTRACT(@query, r'(?i)\\b(ERR-[A-Z0-9-]+)\\b'))
+            THEN 0.95
+          WHEN REGEXP_CONTAINS(@query, r'(?i)ERR-[A-Z0-9-]+') AND REGEXP_CONTAINS(v.chunk_content, r'(?i)ERR-[A-Z0-9-]+')
+            THEN GREATEST(v.cosine_similarity, 0.85)
+          ELSE v.cosine_similarity
+        END AS boosted_score
+      FROM vector_candidates v
+    ),
+    top_match AS (
+      SELECT *
+      FROM scored_candidates
+      ORDER BY boosted_score DESC, cosine_similarity DESC
+      LIMIT 1
     )
     SELECT
       m.document_filename,
@@ -125,9 +145,9 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
       m.equipment_covered,
       m.source_pdf_uri,
       m.chunk_index,
-      m.similarity_score,
+      m.boosted_score AS similarity_score,
       STRING_AGG(c.chunk_content, '\\n' ORDER BY c.chunk_index ASC) AS stitched_content
-    FROM matched_chunks m
+    FROM top_match m
     JOIN `{project_id}.cymbal_gold.pos_manual_chunk_embeddings` c
       ON m.document_filename = c.document_filename
      AND c.chunk_index BETWEEN (m.chunk_index - 1) AND (m.chunk_index + 1)
@@ -137,78 +157,23 @@ def _execute_rag_search(client: bigquery.Client, project_id: str, query: str) ->
       m.equipment_covered,
       m.source_pdf_uri,
       m.chunk_index,
-      m.similarity_score
-    ORDER BY m.similarity_score DESC
-    LIMIT 1
+      m.boosted_score
     """
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("query", "STRING", query)]
     )
-    results = list(client.query(vector_sql, job_config=job_config).result())
+    results = list(client.query(unified_sql, job_config=job_config).result())
 
     if results:
         top_row = results[0]
         score = top_row["similarity_score"]
         if score >= SIMILARITY_THRESHOLD:
-            return _format_runbook_response(top_row, method="Vector Similarity Search")
+            return _format_runbook_response(top_row, method="Unified Semantic Vector Search")
 
-    # 2. Fallback: Full-Text SEARCH() for exact error codes or domain keywords
-    error_codes = re.findall(r"[A-Z0-9]+-[A-Z0-9-]+", query)
-    search_terms = []
-    if error_codes:
-        search_terms.extend(error_codes)
+    # Mandatory standard decline response string under similarity threshold drop or out-of-scope
+    return DECLINE_OUT_OF_SCOPE
 
-    for kw in ["EMV", "freeze", "cutter", "solenoid", "thermal", "beep", "offline", "reboot"]:
-        if kw.lower() in query.lower() and kw not in search_terms:
-            search_terms.append(kw)
-
-    for term in search_terms:
-        formatted_term = f"`{term}`" if "-" in term else term
-        fallback_sql = f"""
-        WITH matched_chunks AS (
-          SELECT
-            document_filename,
-            document_title,
-            equipment_covered,
-            source_pdf_uri,
-            chunk_index,
-            0.85 AS similarity_score
-          FROM `{project_id}.cymbal_gold.pos_manual_chunk_embeddings`
-          WHERE SEARCH(chunk_content, @search_term)
-          LIMIT 1
-        )
-        SELECT
-          m.document_filename,
-          m.document_title,
-          m.equipment_covered,
-          m.source_pdf_uri,
-          m.chunk_index,
-          m.similarity_score,
-          STRING_AGG(c.chunk_content, '\\n' ORDER BY c.chunk_index ASC) AS stitched_content
-        FROM matched_chunks m
-        JOIN `{project_id}.cymbal_gold.pos_manual_chunk_embeddings` c
-          ON m.document_filename = c.document_filename
-         AND c.chunk_index BETWEEN (m.chunk_index - 1) AND (m.chunk_index + 1)
-        GROUP BY
-          m.document_filename,
-          m.document_title,
-          m.equipment_covered,
-          m.source_pdf_uri,
-          m.chunk_index,
-          m.similarity_score
-        """
-        fb_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("search_term", "STRING", formatted_term)
-            ]
-        )
-        fb_results = list(client.query(fallback_sql, job_config=fb_config).result())
-        if fb_results:
-            return _format_runbook_response(fb_results[0], method=f"Full-Text SEARCH Fallback ('{term}')")
-
-    # 3. Certified Safety Fallback Warning when out-of-scope or below threshold
-    return WARNING_BELOW_THRESHOLD
 
 
 def _format_runbook_response(row: bigquery.Row, method: str) -> str:
