@@ -143,7 +143,14 @@ def test_adk_run_sse(server_fixture: subprocess.Popen[str]) -> None:
         "app_name": "app",
         "user_id": user_id,
         "session_id": session_id,
-        "new_message": {"role": "user", "parts": [{"text": "Hi!"}]},
+        "new_message": {
+            "role": "user",
+            "parts": [
+                {
+                    "text": "What is the immediate field recovery protocol when a cashier encounters an ERR-PAY-4001 EMV contactless payment freeze?"
+                }
+            ],
+        },
         "streaming": True,
     }
     response = requests.post(
@@ -175,7 +182,13 @@ def test_a2a_chat_stream(server_fixture: subprocess.Popen[str]) -> None:
     message = Message(
         message_id=f"msg-user-{uuid.uuid4()}",
         role=Role.user,
-        parts=[Part(root=TextPart(text="Hi!"))],
+        parts=[
+            Part(
+                root=TextPart(
+                    text="Check transaction details for TXN-20260312-0015811 and show the warranty coverage policy."
+                )
+            )
+        ],
     )
     request = SendStreamingMessageRequest(
         id="test-req-001",
@@ -248,7 +261,10 @@ def test_reasoning_engine_stream(server_fixture: subprocess.Popen[str]) -> None:
         headers=HEADERS,
         json={
             "class_method": "async_stream_query",
-            "input": {"user_id": f"u-{uuid.uuid4()}", "message": "Hi!"},
+            "input": {
+                "user_id": f"u-{uuid.uuid4()}",
+                "message": "What is the estimated cover hours remaining for store inventory positions experiencing stockout risk of less than 20 hours?",
+            },
         },
         stream=True,
         timeout=60,

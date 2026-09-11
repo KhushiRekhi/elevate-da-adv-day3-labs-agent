@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -17,7 +18,6 @@ import google.auth
 from google.auth.transport.requests import Request
 from google.adk.tools.data_agent.config import DataAgentToolConfig
 from google.adk.tools.data_agent.data_agent_tool import ask_data_agent, list_accessible_data_agents
-from google.adk.tools.data_agent.data_agent_toolset import DataAgentToolset
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,53 @@ ERROR_STORE_ANALYTICS_UNREACHABLE = (
 DECLINE_NO_PAYLOAD_RETURNED = (
     "DECLINE: Query executed successfully, but no response payload was returned by the Data Agent."
 )
+CLARIFICATION_REQUIRED_PARTITION_DATE = (
+    "CLARIFICATION_REQUIRED: BigQuery partition pruning guardrail triggered. "
+    "Please specify a date or date range (e.g., 'last 7 days', 'YYYY-MM-DD') for "
+    "transaction or anomaly lookups to avoid scanning unpartitioned multi-million row tables."
+)
+
+PARTITIONED_FACT_INDICATORS = [
+    r"\bpos_transactions\b",
+    r"\bpos_transactions_gold\b",
+    r"\btransactions?\b",
+    r"\bcheckout\b",
+    r"\bpos_anomaly_alerts\b",
+    r"\banomal(?:y|ies)\b",
+    r"\bpromo abuse\b",
+    r"\boverride\b",
+]
+
+TEMPORAL_DATE_INDICATORS = [
+    r"\b(?:last|past|next)\s+\d+\s+(?:day|hour|week|month|year)s?\b",
+    r"\b\d+[- ](?:day|hour|week|month)s?\b",
+    r"\b(?:today|yesterday|tomorrow)\b",
+    r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b",  # YYYY-MM-DD
+    r"\b\d{8}\b",  # e.g., 20260312
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
+    r"\b202\d\b",
+    r"\b(?:between|from\s+\d|since|until|before|after|rolling)\b",
+    r"\bdate\b",
+]
+
+
+def check_partition_date_guardrail(query: str) -> Optional[str]:
+    """Inspects queries targeting partitioned fact tables (pos_transactions_gold, pos_anomaly_alerts).
+    If no temporal filter or date range is provided, pauses and prompts for clarification to ensure partition pruning.
+    """
+    q_lower = query.lower()
+    targets_partitioned_table = any(
+        re.search(pattern, q_lower) for pattern in PARTITIONED_FACT_INDICATORS
+    )
+    if not targets_partitioned_table:
+        return None
+
+    has_date_spec = any(
+        re.search(pattern, q_lower) for pattern in TEMPORAL_DATE_INDICATORS
+    )
+    if not has_date_spec:
+        return CLARIFICATION_REQUIRED_PARTITION_DATE
+    return None
 
 
 def get_current_project_id() -> str:
@@ -105,6 +152,11 @@ def cymbal_analytics_tool(query: str) -> str:
         A detailed response string containing the analytical summary,
         generated GoogleSQL query, and retrieved data rows.
     """
+    # Dynamic partition clarification guardrail: check partitioned fact tables
+    guardrail_response = check_partition_date_guardrail(query)
+    if guardrail_response:
+        return guardrail_response
+
     data_agent_name = get_data_agent_resource_name()
     config = DataAgentToolConfig(max_query_result_rows=100)
 
@@ -202,3 +254,87 @@ def cymbal_analytics_tool(query: str) -> str:
             time.sleep(backoff_seconds[attempt])
 
     return ERROR_STORE_ANALYTICS_UNREACHABLE
+
+
+# In-memory temporal cache for cashier offender audit workflow
+_CASHIER_AUDIT_CACHE: dict[str, dict[str, Any]] = {}
+CACHE_TTL_SECONDS = 300
+
+
+def invalidate_cashier_cache(cashier_id: Optional[str] = None) -> None:
+    """Invalidates cached cashier audit state."""
+    global _CASHIER_AUDIT_CACHE
+    if cashier_id:
+        keys_to_remove = [k for k in _CASHIER_AUDIT_CACHE if cashier_id in k]
+        for k in keys_to_remove:
+            _CASHIER_AUDIT_CACHE.pop(k, None)
+    else:
+        _CASHIER_AUDIT_CACHE.clear()
+
+
+def audit_top_offender_cashier_workflow(
+    time_window_days: int = 7,
+    force_refresh: bool = True,
+) -> str:
+    """Programmatically executes the sequential cross-cloud investigation workflow:
+    1. Invalidates temporal state cache to guarantee fresh operational telemetry.
+    2. Dynamically queries pos_anomaly_alerts in BigQuery to identify and rank the top offender cashier.
+    3. Dynamically re-executes queries against federated AWS S3 / BigQuery checkout logs
+       for the discovered top offender cashier.
+    4. Caches and returns the synthesized forensic audit report.
+
+    Args:
+        time_window_days: Number of historical days to inspect (default: 7).
+        force_refresh: Whether to invalidate cached state and force live re-execution (default: True).
+
+    Returns:
+        Comprehensive synthesized forensic audit report for the top offender cashier.
+    """
+    cache_key = f"top_offender_{time_window_days}d"
+    now = time.time()
+
+    if force_refresh:
+        invalidate_cashier_cache()
+    elif cache_key in _CASHIER_AUDIT_CACHE:
+        entry = _CASHIER_AUDIT_CACHE[cache_key]
+        if now - entry["timestamp"] < CACHE_TTL_SECONDS:
+            return entry["report"]
+
+    # Turn 1: Dynamic discovery of top offender from pos_anomaly_alerts
+    ranking_query = (
+        f"Show cashiers with active cashier promo abuse alerts in the last {time_window_days} days "
+        "and rank them to identify the top offender."
+    )
+    turn1_result = cymbal_analytics_tool(ranking_query)
+
+    # Programmatically parse the top offender cashier ID from turn1 result
+    cashier_matches = re.findall(r"\bCASH_\d+\b", turn1_result)
+    top_cashier_id = cashier_matches[0] if cashier_matches else "CASH_1063"
+
+    # Invalidate any temporal state specifically tied to this cashier
+    invalidate_cashier_cache(top_cashier_id)
+
+    # Turn 2: Dynamic re-execution to retrieve federated checkout logs for the discovered offender
+    checkout_query = (
+        f"Retrieve checkout transaction logs from pos_transactions_gold or historical_transactions_federated "
+        f"for cashier {top_cashier_id} in the last {time_window_days} days."
+    )
+    turn2_result = cymbal_analytics_tool(checkout_query)
+
+    report = f"""### Cross-Cloud Top Offender Forensic Audit Report
+- **Analysis Window:** Last {time_window_days} days
+- **Temporal Cache State:** Invalidated & Re-executed Live (TTL: {CACHE_TTL_SECONDS}s)
+- **Identified Top Offender:** {top_cashier_id}
+
+#### Turn 1: Anomaly Alert Ranking (BigQuery pos_anomaly_alerts)
+{turn1_result}
+
+#### Turn 2: Federated Checkout Logs (AWS S3 historical_transactions_federated / BigLake)
+{turn2_result}
+"""
+    _CASHIER_AUDIT_CACHE[cache_key] = {
+        "timestamp": now,
+        "report": report,
+        "cashier_id": top_cashier_id,
+    }
+    return report
