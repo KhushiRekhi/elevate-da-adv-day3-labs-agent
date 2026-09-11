@@ -109,5 +109,5 @@ root_agent = cymbal_operations_agent
 
 app = App(
     root_agent=cymbal_operations_agent,
-    name="cymbal_operations_agent",
+    name="app",
 )
